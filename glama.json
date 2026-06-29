@@ -1,0 +1,33 @@
+{
+  "$schema": "https://glama.ai/mcp/schemas/server.json",
+  "maintainers": ["AmitabhainArunachala"],
+  "name": "x402-crypto-price-tracker",
+  "description": "Agent-payable crypto market data and revenue intelligence over HTTP 402/x402. 7 paid endpoints ($0.01-$1.00 USDC on Base), 4 MCP tools (revenue scanner, x402 auditor, bounty finder, dealwork scout). No API keys — agents pay per call via EIP-3009.",
+  "tools": [
+    {
+      "name": "scan_revenue_surfaces",
+      "description": "Rank current agent monetization surfaces with immediate actions."
+    },
+    {
+      "name": "audit_x402_endpoint",
+      "description": "Audit an x402 endpoint for discovery, robots, manifest, paid-route, and stable-domain readiness."
+    },
+    {
+      "name": "find_bountybook_jobs",
+      "description": "Find BountyBook jobs likely to pass oracle verification."
+    },
+    {
+      "name": "find_dealwork_low_competition",
+      "description": "Find low-competition DealWork opportunities and bid recommendations."
+    }
+  ],
+  "transport": "http",
+  "url": "https://x402.167-172-95-184.nip.io/mcp/call",
+  "catalog_url": "https://x402.167-172-95-184.nip.io/mcp/tools",
+  "payment": {
+    "protocol": "x402",
+    "price_usdc": 0.05,
+    "network": "base-sepolia",
+    "facilitator": "https://x402.org/facilitator"
+  }
+}
