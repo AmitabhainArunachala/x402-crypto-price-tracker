@@ -445,7 +445,7 @@ async def x402_payment_middleware(request: Request, call_next):
     headers = augment_payment_required_header(headers, request)
     if body and body.strip() not in {b"{}", b"null"}:
         # MPPScan/MPP discovery requires WWW-Authenticate: Payment header with MPP challenge params
-        headers["WWW-Authenticate"] = 'Payment realm="crypto-price", method="x402", intent="charge", currency="USDC", network="eip155:84532"'
+        headers["WWW-Authenticate"] = f'Payment realm="crypto-price", method="x402", intent="charge", currency="USDC", network="{NETWORK_CAIP2}"'
         return Response(
             content=body,
             status_code=response.status_code,
@@ -463,7 +463,7 @@ async def x402_payment_middleware(request: Request, call_next):
         )
     headers["X-402-Fallback-Requirements"] = "true"
     # MPPScan/MPP discovery requires WWW-Authenticate: Payment header to detect MPP protocol support
-    headers["WWW-Authenticate"] = 'Payment realm="crypto-price", network="eip155:84532", asset="USDC"'
+    headers["WWW-Authenticate"] = f'Payment realm="crypto-price", network="{NETWORK_CAIP2}", asset="USDC"'
     return JSONResponse(content=requirements, status_code=402, headers=headers)
 
 
@@ -1664,6 +1664,61 @@ def revenue_mcp_tools_catalog(base_url: str) -> dict[str, Any]:
                 "description": "Find low-competition DealWork opportunities and bid recommendations.",
                 "input_schema": {"type": "object", "properties": {"max_bids": {"type": "integer"}}},
             },
+            {
+                "name": "web_search_extract",
+                "description": "Search the web and return structured results with titles, URLs, snippets, and content previews. No API key needed.",
+                "input_schema": {"type": "object", "properties": {"query": {"type": "string"}, "max_results": {"type": "integer"}}, "required": ["query"]},
+            },
+            {
+                "name": "scrape_url",
+                "description": "Fetch any URL and return its title, meta description, and text content (up to 2000 chars). Useful for content extraction and page analysis.",
+                "input_schema": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]},
+            },
+            {
+                "name": "json_to_csv",
+                "description": "Convert JSON data (list of objects or single object) to CSV format. Returns headers and rows.",
+                "input_schema": {"type": "object", "properties": {"data": {"type": "array"}}, "required": ["data"]},
+            },
+            {
+                "name": "text_summarize",
+                "description": "Extractive text summarization. Scores sentences by word frequency and returns the top sentences. Supports custom max_words parameter.",
+                "input_schema": {"type": "object", "properties": {"text": {"type": "string"}, "max_words": {"type": "integer"}}, "required": ["text"]},
+            },
+            {
+                "name": "html_to_markdown",
+                "description": "Convert HTML to clean markdown. Handles headings, bold, italic, links, lists, code blocks, and paragraphs.",
+                "input_schema": {"type": "object", "properties": {"html": {"type": "string"}}, "required": ["html"]},
+            },
+            {
+                "name": "sentiment_analysis",
+                "description": "Lexicon-based sentiment analysis. Returns positive/negative/neutral label, score, and word counts.",
+                "input_schema": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
+            },
+            {
+                "name": "detect_language",
+                "description": "Detect language from text using common word patterns. Supports 10 languages including English, Japanese, Chinese, Korean, Spanish, French, German, Portuguese, Arabic, Hindi.",
+                "input_schema": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
+            },
+            {
+                "name": "validate_json",
+                "description": "Validate JSON string and return parsed type, keys, pretty-printed output, or error with line/column/position.",
+                "input_schema": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
+            },
+            {
+                "name": "count_words",
+                "description": "Detailed text statistics: word count, sentences, paragraphs, characters, average word/sentence length, reading time, and complexity score.",
+                "input_schema": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
+            },
+            {
+                "name": "extract_urls",
+                "description": "Extract all URLs, email addresses, and domain names from text. Returns counts and lists.",
+                "input_schema": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
+            },
+            {
+                "name": "base64_codec",
+                "description": "Base64 encode or decode text. Mode: 'encode' (default) or 'decode'.",
+                "input_schema": {"type": "object", "properties": {"text": {"type": "string"}, "mode": {"type": "string"}}, "required": ["text"]},
+            },
         ],
     }
 
@@ -1727,10 +1782,434 @@ def execute_paid_mcp_tool(tool: str, payload: dict[str, Any], base_url: str) -> 
             "pending_bid": "a96df932-0ae7-4478-a16e-98c04d80feff",
             "next_action": "Poll contracts; avoid expanding bids unless acceptance signals appear.",
         }
+    if tool == "web_search_extract":
+        query = str(payload.get("query") or payload.get("q") or "")
+        if not query:
+            return {"error": "missing 'query' parameter", "usage": "POST /mcp/call with {\"tool\":\"web_search_extract\",\"arguments\":{\"query\":\"your search query\"}}"}
+        max_results = int(payload.get("max_results") or 3)
+        return _web_search_extract(query, max_results)
+    if tool == "scrape_url":
+        url = str(payload.get("url") or "")
+        if not url:
+            return {"error": "missing 'url' parameter", "usage": "POST /mcp/call with {\"tool\":\"scrape_url\",\"arguments\":{\"url\":\"https://example.com\"}}"}
+        return _scrape_url(url)
+    if tool == "json_to_csv":
+        data = payload.get("data")
+        if data is None:
+            return {"error": "missing 'data' parameter", "usage": "POST /mcp/call with {\"tool\":\"json_to_csv\",\"arguments\":{\"data\":[...]}"}
+        return _json_to_csv(data)
+    if tool == "text_summarize":
+        text = str(payload.get("text") or "")
+        if not text:
+            return {"error": "missing 'text' parameter", "usage": "POST /mcp/call with {\"tool\":\"text_summarize\",\"arguments\":{\"text\":\"...\"}}"}
+        max_words = int(payload.get("max_words") or 100)
+        return _text_summarize(text, max_words)
+    if tool == "html_to_markdown":
+        html = str(payload.get("html") or "")
+        if not html:
+            return {"error": "missing 'html' parameter"}
+        return _html_to_markdown(html)
+    if tool == "sentiment_analysis":
+        text = str(payload.get("text") or "")
+        if not text:
+            return {"error": "missing 'text' parameter"}
+        return _sentiment_analysis(text)
+    if tool == "detect_language":
+        text = str(payload.get("text") or "")
+        if not text:
+            return {"error": "missing 'text' parameter"}
+        return _detect_language(text)
+    if tool == "validate_json":
+        text = str(payload.get("text") or "")
+        if not text:
+            return {"error": "missing 'text' parameter"}
+        return _validate_json(text)
+    if tool == "count_words":
+        text = str(payload.get("text") or "")
+        if not text:
+            return {"error": "missing 'text' parameter"}
+        return _count_words(text)
+    if tool == "extract_urls":
+        text = str(payload.get("text") or "")
+        if not text:
+            return {"error": "missing 'text' parameter"}
+        return _extract_urls(text)
+    if tool == "base64_codec":
+        text = str(payload.get("text") or "")
+        mode = str(payload.get("mode") or "encode")
+        if not text:
+            return {"error": "missing 'text' parameter"}
+        return _base64_codec(text, mode)
     return {"error": "unknown_tool", "available_tools": [t["name"] for t in revenue_mcp_tools_catalog(base_url)["tools"]]}
 
 
-@app.post("/mcp/call")
+# ---------------------------------------------------------------------------
+# Real MCP tool implementations — these do actual work
+# ---------------------------------------------------------------------------
+
+def _web_search_extract(query: str, max_results: int = 3) -> dict[str, Any]:
+    """Search the web and return structured results with extracted content."""
+    import urllib.parse
+    import urllib.request as urlreq
+    import re
+    # Use DuckDuckGo HTML endpoint (no API key needed)
+    search_url = "https://html.duckduckgo.com/html/?q=" + urllib.parse.quote(query)
+    results: list[dict[str, Any]] = []
+    try:
+        req = urlreq.Request(search_url, headers={
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        })
+        resp = urlreq.urlopen(req, timeout=10)
+        html = resp.read().decode("utf-8", errors="replace")
+        # Parse result links and snippets from DDG HTML
+        import re
+        # DDG HTML results: <a class="result__a" href="...">title</a> + <a class="result__snippet">
+        link_pattern = re.compile(r'class="result__a"[^>]*href="([^"]+)"[^>]*>([^<]+)', re.IGNORECASE)
+        snippet_pattern = re.compile(r'class="result__snippet"[^>]*>([^<]+)', re.IGNORECASE)
+        links = link_pattern.findall(html)
+        snippets = snippet_pattern.findall(html)
+        # DDG wraps URLs in redirect — unwrap
+        def unwrap(ddg_url: str) -> str:
+            if "uddg=" in ddg_url:
+                # Handle protocol-relative URLs
+                if ddg_url.startswith("//"):
+                    ddg_url = "https:" + ddg_url
+                parsed = urllib.parse.urlparse(ddg_url)
+                params = urllib.parse.parse_qs(parsed.query)
+                if "uddg" in params:
+                    return params["uddg"][0]
+            return ddg_url
+        for i, (raw_url, title) in enumerate(links[:max_results]):
+            url = unwrap(raw_url)
+            snippet = snippets[i] if i < len(snippets) else ""
+            # Try to extract page content
+            content_preview = ""
+            try:
+                page_req = urlreq.Request(url, headers={
+                    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
+                })
+                page_resp = urlreq.urlopen(page_req, timeout=8)
+                page_html = page_resp.read().decode("utf-8", errors="replace")
+                # Strip HTML tags for a text preview
+                import re as re2
+                text = re2.sub(r'<script[^>]*>.*?</script>', '', page_html, flags=re2.DOTALL)
+                text = re2.sub(r'<style[^>]*>.*?</style>', '', text, flags=re2.DOTALL)
+                text = re2.sub(r'<[^>]+>', ' ', text)
+                text = re2.sub(r'\s+', ' ', text).strip()
+                content_preview = text[:500]
+            except Exception:
+                pass
+            results.append({
+                "title": title.strip(),
+                "url": url,
+                "snippet": snippet.strip() if snippet else "",
+                "content_preview": content_preview,
+            })
+    except Exception as e:
+        return {"error": f"search failed: {str(e)}", "query": query}
+    return {
+        "query": query,
+        "results_count": len(results),
+        "results": results,
+        "tool": "web_search_extract",
+    }
+
+
+def _scrape_url(url: str) -> dict[str, Any]:
+    """Fetch a URL and return its text content, title, and metadata."""
+    import re
+    import urllib.request as urlreq
+    try:
+        req = urlreq.Request(url, headers={
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
+        })
+        resp = urlreq.urlopen(req, timeout=10)
+        html = resp.read().decode("utf-8", errors="replace")
+        # Extract title
+        title_match = re.search(r'<title[^>]*>([^<]+)</title>', html, re.IGNORECASE)
+        title = title_match.group(1).strip() if title_match else ""
+        # Extract meta description
+        meta_match = re.search(r'<meta[^>]+name=["\']description["\'][^>]+content=["\']([^"\']+)', html, re.IGNORECASE)
+        description = meta_match.group(1).strip() if meta_match else ""
+        # Strip to text
+        text = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL)
+        text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL)
+        text = re.sub(r'<[^>]+>', ' ', text)
+        text = re.sub(r'\s+', ' ', text).strip()
+        return {
+            "url": url,
+            "status": resp.status,
+            "title": title,
+            "description": description,
+            "content_length": len(text),
+            "content": text[:2000],
+            "content_full_length": len(text),
+        }
+    except Exception as e:
+        return {"error": f"scrape failed: {str(e)}", "url": url}
+
+
+def _json_to_csv(data: Any) -> dict[str, Any]:
+    """Convert JSON data (list of objects or single object) to CSV format."""
+    import io
+    import csv
+    try:
+        if isinstance(data, dict):
+            data = [data]
+        if not isinstance(data, list) or not data:
+            return {"error": "data must be a non-empty list or object"}
+        # Get all unique keys
+        keys = set()
+        for item in data:
+            if isinstance(item, dict):
+                keys.update(item.keys())
+        keys = sorted(keys)
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=keys)
+        writer.writeheader()
+        for item in data:
+            writer.writerow({k: item.get(k, "") for k in keys})
+        return {
+            "rows": len(data),
+            "columns": keys,
+            "csv": output.getvalue(),
+            "tool": "json_to_csv",
+        }
+    except Exception as e:
+        return {"error": f"conversion failed: {str(e)}"}
+
+
+def _text_summarize(text: str, max_words: int = 100) -> dict[str, Any]:
+    """Extractive summary: pick top sentences by word frequency scoring."""
+    import re
+    import collections
+    try:
+        # Split into sentences
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        if len(sentences) <= 3:
+            summary_text = text[:max_words * 6]
+            return {"summary": summary_text, "sentences": len(sentences), "method": "passthrough", "word_count": len(summary_text.split()), "original_sentences": len(sentences), "summary_sentences": len(sentences), "tool": "text_summarize"}
+        # Score words by frequency (excluding stop words)
+        stop_words = {"the", "a", "an", "is", "are", "was", "were", "in", "on", "at", "to", "of", "for", "and", "or", "but", "not", "this", "that", "it", "with", "as", "by", "from", "be", "have", "has", "had", "will", "would", "could", "should", "can", "may", "might", "must", "shall", "do", "does", "did", "so", "if", "then", "else", "when", "where", "which", "who", "whom", "whose", "what", "why", "how", "all", "any", "both", "each", "few", "more", "most", "other", "some", "such", "no", "nor", "not", "only", "own", "same", "than", "too", "very", "just", "also"}
+        words = re.findall(r'\b[a-z]+\b', text.lower())
+        word_freq = collections.Counter(w for w in words if w not in stop_words and len(w) > 2)
+        # Score sentences
+        scored = []
+        for i, sent in enumerate(sentences):
+            sent_words = re.findall(r'\b[a-z]+\b', sent.lower())
+            score = sum(word_freq.get(w, 0) for w in sent_words) / max(len(sent_words), 1)
+            scored.append((i, sent, score))
+        # Pick top sentences, maintain original order
+        scored.sort(key=lambda x: -x[2])
+        top = sorted(scored[:5], key=lambda x: x[0])
+        summary = " ".join(s[1] for s in top)
+        # Truncate to max_words
+        words_out = summary.split()
+        if len(words_out) > max_words:
+            summary = " ".join(words_out[:max_words]) + "..."
+        return {
+            "summary": summary,
+            "original_sentences": len(sentences),
+            "summary_sentences": len(top),
+            "word_count": len(summary.split()),
+            "tool": "text_summarize",
+        }
+    except Exception as e:
+        return {"error": f"summarize failed: {str(e)}"}
+
+
+def _html_to_markdown(html: str) -> dict[str, Any]:
+    """Convert HTML to clean markdown."""
+    import re
+    try:
+        # Remove scripts and styles
+        text = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL | re.IGNORECASE)
+        # Headings
+        for i in range(6, 0, -1):
+            text = re.sub(f'<h{i}[^>]*>(.*?)</h{i}>', lambda m: '#' * i + ' ' + m.group(1).strip(), text, flags=re.DOTALL | re.IGNORECASE)
+        # Bold/italic
+        text = re.sub(r'<(strong|b)>(.*?)</\1>', r'**\2**', text, flags=re.IGNORECASE)
+        text = re.sub(r'<(em|i)>(.*?)</\1>', r'*\2*', text, flags=re.IGNORECASE)
+        # Links
+        text = re.sub(r'<a[^>]*href=["\']([^"\']+)[^>]*>(.*?)</a>', r'[\2](\1)', text, flags=re.DOTALL | re.IGNORECASE)
+        # Lists
+        text = re.sub(r'<li[^>]*>(.*?)</li>', r'- \1\n', text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r'</?(ul|ol)[^>]*>', '\n', text, flags=re.IGNORECASE)
+        # Code blocks
+        text = re.sub(r'<pre[^>]*><code[^>]*>(.*?)</code></pre>', lambda m: '\n```\n' + re.sub(r'<[^>]+>', '', m.group(1)) + '\n```\n', text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r'<code[^>]*>(.*?)</code>', r'`\1`', text, flags=re.DOTALL | re.IGNORECASE)
+        # Paragraphs and breaks
+        text = re.sub(r'<p[^>]*>(.*?)</p>', r'\1\n\n', text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
+        # Strip remaining tags
+        text = re.sub(r'<[^>]+>', '', text)
+        # Clean up whitespace
+        text = re.sub(r'\n{3,}', '\n\n', text).strip()
+        return {"markdown": text[:5000], "length": len(text), "tool": "html_to_markdown"}
+    except Exception as e:
+        return {"error": f"conversion failed: {str(e)}"}
+
+
+def _sentiment_analysis(text: str) -> dict[str, Any]:
+    """Simple lexicon-based sentiment analysis."""
+    import re
+    try:
+        positive_words = {"good","great","excellent","amazing","positive","success","win","best","love","perfect","awesome","outstanding","strong","bullish","profit","gain","opportunity","breakthrough","innovative","growth","increase","up","rise","boost","beneficial","optimistic","favorable","impressive","remarkable","superb","fantastic"}
+        negative_words = {"bad","terrible","awful","negative","fail","loss","worst","hate","poor","weak","bearish","decline","decrease","down","fall","risk","threat","crisis","concern","dangerous","disappointing","flaw","problem","issue","critical","broken","dead","scam","dump","crash","liquidation"}
+        words = re.findall(r'\b[a-z]+\b', text.lower())
+        pos = sum(1 for w in words if w in positive_words)
+        neg = sum(1 for w in words if w in negative_words)
+        total = len(words)
+        if total == 0:
+            return {"error": "no words found"}
+        score = (pos - neg) / max(total, 1)
+        if score > 0.05:
+            label = "positive"
+        elif score < -0.05:
+            label = "negative"
+        else:
+            label = "neutral"
+        return {
+            "sentiment": label,
+            "score": round(score, 4),
+            "positive_words": pos,
+            "negative_words": neg,
+            "total_words": total,
+            "tool": "sentiment_analysis",
+        }
+    except Exception as e:
+        return {"error": f"analysis failed: {str(e)}"}
+
+
+def _detect_language(text: str) -> dict[str, Any]:
+    """Detect language using character frequency analysis."""
+    import re
+    try:
+        # Simple heuristic based on common words and character sets
+        patterns = {
+            "english": ["the", "and", "is", "are", "was", "you", "for", "not", "this", "with"],
+            "japanese": ["は", "が", "の", "を", "に", "で", "と", "た", "です", "ます"],
+            "chinese": ["的", "是", "在", "了", "有", "和", "人", "这", "中", "为"],
+            "korean": ["이", "가", "은", "는", "에", "를", "을", "의", "도", "한"],
+            "spanish": ["el", "la", "de", "que", "en", "es", "un", "por", "con", "para"],
+            "french": ["le", "la", "de", "et", "les", "des", "un", "une", "est", "que"],
+            "german": ["der", "die", "das", "und", "ist", "ein", "eine", "mit", "von", "nicht"],
+            "portuguese": ["o", "a", "de", "que", "e", "do", "da", "em", "um", "para"],
+            "arabic": ["في", "من", "على", "إلى", "عن", "أن", "هذا", "هو", "هي", "مع"],
+            "hindi": ["है", "का", "की", "और", "ने", "से", "को", "में", "हो", "यह"],
+        }
+        text_lower = text.lower()
+        scores = {}
+        for lang, words in patterns.items():
+            scores[lang] = sum(text_lower.count(w) for w in words)
+        detected = max(scores, key=scores.get) if any(scores.values()) else "unknown"
+        return {
+            "language": detected,
+            "confidence": max(scores.values()) if any(scores.values()) else 0,
+            "all_scores": {k: v for k, v in sorted(scores.items(), key=lambda x: -x[1]) if v > 0},
+            "text_length": len(text),
+            "tool": "detect_language",
+        }
+    except Exception as e:
+        return {"error": f"detection failed: {str(e)}"}
+
+
+def _validate_json(text: str) -> dict[str, Any]:
+    """Validate and pretty-print JSON."""
+    import json as jsonmod
+    try:
+        data = jsonmod.loads(text)
+        return {
+            "valid": True,
+            "type": type(data).__name__,
+            "keys": list(data.keys()) if isinstance(data, dict) else None,
+            "length": len(data) if isinstance(data, (list, dict)) else None,
+            "pretty": jsonmod.dumps(data, indent=2)[:3000],
+            "tool": "validate_json",
+        }
+    except jsonmod.JSONDecodeError as e:
+        return {
+            "valid": False,
+            "error": str(e),
+            "line": e.lineno,
+            "column": e.colno,
+            "position": e.pos,
+            "tool": "validate_json",
+        }
+
+
+def _count_words(text: str) -> dict[str, Any]:
+    """Detailed text statistics: words, sentences, reading time, complexity."""
+    import re
+    try:
+        words = re.findall(r'\b\w+\b', text)
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        sentences = [s for s in sentences if s.strip()]
+        paragraphs = [p for p in text.split('\n\n') if p.strip()]
+        # Average word length
+        avg_word_len = sum(len(w) for w in words) / max(len(words), 1)
+        # Sentence length
+        avg_sent_len = len(words) / max(len(sentences), 1)
+        # Reading time (avg 200 wpm)
+        reading_time = len(words) / 200
+        # Long words (complexity indicator)
+        long_words = sum(1 for w in words if len(w) > 7)
+        complexity = "high" if long_words / max(len(words), 1) > 0.2 else "medium" if long_words / max(len(words), 1) > 0.1 else "low"
+        return {
+            "words": len(words),
+            "sentences": len(sentences),
+            "paragraphs": len(paragraphs),
+            "characters": len(text),
+            "avg_word_length": round(avg_word_len, 2),
+            "avg_sentence_length": round(avg_sent_len, 2),
+            "long_words": long_words,
+            "complexity": complexity,
+            "reading_time_minutes": round(reading_time, 1),
+            "tool": "count_words",
+        }
+    except Exception as e:
+        return {"error": f"count failed: {str(e)}"}
+
+
+def _extract_urls(text: str) -> dict[str, Any]:
+    """Extract all URLs from text with their positions."""
+    import re
+    try:
+        url_pattern = re.compile(r'https?://[^\s<>"\')\]]+')
+        urls = url_pattern.findall(text)
+        # Also find email addresses
+        email_pattern = re.compile(r'\b[\w.+-]+@[\w-]+\.[\w.-]+\b')
+        emails = email_pattern.findall(text)
+        # Find domains mentioned without protocol
+        domain_pattern = re.compile(r'\b([a-z0-9-]+\.(com|org|net|io|ai|dev|app|xyz|co|me))\b', re.IGNORECASE)
+        domains = [d[0] for d in domain_pattern.findall(text) if d[0] not in ' '.join(urls)]
+        return {
+            "urls": urls,
+            "url_count": len(urls),
+            "emails": emails,
+            "email_count": len(emails),
+            "domains": list(set(domains)),
+            "tool": "extract_urls",
+        }
+    except Exception as e:
+        return {"error": f"extraction failed: {str(e)}"}
+
+
+def _base64_codec(text: str, mode: str = "encode") -> dict[str, Any]:
+    """Base64 encode or decode text."""
+    import base64 as b64
+    try:
+        if mode == "decode":
+            decoded = b64.b64decode(text).decode("utf-8", errors="replace")
+            return {"decoded": decoded, "length": len(decoded), "tool": "base64_codec", "mode": "decode"}
+        else:
+            encoded = b64.b64encode(text.encode()).decode()
+            return {"encoded": encoded, "length": len(encoded), "tool": "base64_codec", "mode": "encode"}
+    except Exception as e:
+        return {"error": f"codec failed: {str(e)}"}
+
+
 async def mcp_call(request: Request):
     """Paid MCP-style gateway. Costs $0.05 USDC via x402."""
     try:
@@ -1750,6 +2229,38 @@ async def mcp_call(request: Request):
         "network": NETWORK,
         "timestamp": int(time.time()),
     }
+
+
+# ---------------------------------------------------------------------------
+# Webhook endpoints for marketplace integrations (free, internal)
+# ---------------------------------------------------------------------------
+
+@app.post("/webhook/toku")
+async def toku_webhook(request: Request):
+    """Receive Toku marketplace webhook notifications for new jobs/orders."""
+    try:
+        payload = await request.json()
+    except Exception:
+        return {"status": "error", "message": "invalid json"}
+    # Log the webhook for the cron sniper to pick up
+    webhook_log = Path("/root/revenue-dojo/toku_webhooks.jsonl")
+    webhook_log.parent.mkdir(parents=True, exist_ok=True)
+    with open(webhook_log, "a") as f:
+        f.write(json.dumps({"timestamp": int(time.time()), "payload": payload}) + "\n")
+    return {"status": "ok", "received": True}
+
+@app.post("/webhook/dealwork")
+async def dealwork_webhook(request: Request):
+    """Receive DealWork marketplace webhook notifications for new contracts/bids."""
+    try:
+        payload = await request.json()
+    except Exception:
+        return {"status": "error", "message": "invalid json"}
+    webhook_log = Path("/root/revenue-dojo/dealwork_webhooks.jsonl")
+    webhook_log.parent.mkdir(parents=True, exist_ok=True)
+    with open(webhook_log, "a") as f:
+        f.write(json.dumps({"timestamp": int(time.time()), "payload": payload}) + "\n")
+    return {"status": "ok", "received": True}
 
 
 # ---------------------------------------------------------------------------
